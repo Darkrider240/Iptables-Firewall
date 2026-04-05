@@ -1,0 +1,934 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>IPTables Firewall Dashboard — Kali Linux</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Exo+2:wght@300;400;600;700;900&display=swap');
+
+  :root {
+    --bg:        #050a0f;
+    --bg2:       #0a1520;
+    --bg3:       #0d1e2e;
+    --card:      #0f2030;
+    --border:    #1a3a55;
+    --cyan:      #00d4ff;
+    --green:     #00ff88;
+    --red:       #ff3a5c;
+    --orange:    #ff8c00;
+    --purple:    #b060ff;
+    --yellow:    #ffd700;
+    --text:      #c8e8ff;
+    --muted:     #4a7a9a;
+    --glow-c:    0 0 20px rgba(0,212,255,.35);
+    --glow-g:    0 0 20px rgba(0,255,136,.35);
+    --glow-r:    0 0 20px rgba(255,58,92,.35);
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Exo 2', sans-serif;
+    font-size: 14px;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ── Scanline overlay ── */
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background: repeating-linear-gradient(
+      0deg, transparent, transparent 2px,
+      rgba(0,0,0,.07) 2px, rgba(0,0,0,.07) 4px
+    );
+    pointer-events: none;
+    z-index: 9999;
+  }
+
+  /* ── Grid bg ── */
+  body::after {
+    content: '';
+    position: fixed; inset: 0;
+    background-image:
+      linear-gradient(rgba(0,212,255,.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,212,255,.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* ── HEADER ── */
+  header {
+    position: sticky; top: 0; z-index: 100;
+    background: rgba(5,10,15,.92);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+    padding: 0 24px;
+    display: flex; align-items: center; justify-content: space-between;
+    height: 60px;
+  }
+
+  .logo {
+    display: flex; align-items: center; gap: 12px;
+  }
+  .logo-shield {
+    width: 36px; height: 36px;
+    background: linear-gradient(135deg, var(--cyan), #0050a0);
+    clip-path: polygon(50% 0%,100% 25%,100% 75%,50% 100%,0% 75%,0% 25%);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px; box-shadow: var(--glow-c);
+    animation: pulse-shield 3s ease-in-out infinite;
+  }
+  @keyframes pulse-shield {
+    0%,100% { box-shadow: 0 0 15px rgba(0,212,255,.4); }
+    50%      { box-shadow: 0 0 35px rgba(0,212,255,.8); }
+  }
+  .logo-text { font-weight: 700; font-size: 18px; letter-spacing: 2px; color: var(--cyan); }
+  .logo-sub  { font-family: 'Share Tech Mono'; font-size: 10px; color: var(--muted); }
+
+  .header-right { display: flex; align-items: center; gap: 20px; }
+  .status-pill {
+    padding: 4px 14px; border-radius: 20px; font-size: 11px; font-weight: 700;
+    letter-spacing: 1px;
+    background: rgba(0,255,136,.1); border: 1px solid var(--green);
+    color: var(--green); box-shadow: var(--glow-g);
+    animation: blink 2s step-end infinite;
+  }
+  @keyframes blink { 50% { opacity: .6; } }
+
+  .time-display {
+    font-family: 'Share Tech Mono'; font-size: 13px; color: var(--muted);
+  }
+
+  /* ── LAYOUT ── */
+  main { position: relative; z-index: 1; padding: 24px; max-width: 1600px; margin: 0 auto; }
+
+  .grid-4 { display: grid; grid-template-columns: repeat(4,1fr); gap: 16px; margin-bottom: 20px; }
+  .grid-3 { display: grid; grid-template-columns: repeat(3,1fr); gap: 16px; margin-bottom: 20px; }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px; }
+  .full   { grid-column: 1/-1; }
+
+  @media(max-width:1100px) {
+    .grid-4 { grid-template-columns: repeat(2,1fr); }
+    .grid-3 { grid-template-columns: 1fr 1fr; }
+  }
+  @media(max-width:700px) {
+    .grid-4,.grid-3,.grid-2 { grid-template-columns: 1fr; }
+  }
+
+  /* ── CARD ── */
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    position: relative;
+    overflow: hidden;
+    transition: border-color .3s, box-shadow .3s;
+  }
+  .card:hover { border-color: var(--cyan); box-shadow: var(--glow-c); }
+  .card::before {
+    content: '';
+    position: absolute; top: 0; left: 0; right: 0; height: 2px;
+    background: linear-gradient(90deg, transparent, var(--cyan), transparent);
+    opacity: 0;
+    transition: opacity .3s;
+  }
+  .card:hover::before { opacity: 1; }
+
+  /* ── STAT CARDS ── */
+  .stat-card { text-align: center; padding: 24px 16px; }
+  .stat-icon {
+    font-size: 28px; margin-bottom: 10px;
+    filter: drop-shadow(0 0 8px currentColor);
+  }
+  .stat-value {
+    font-size: 36px; font-weight: 900; letter-spacing: -1px;
+    line-height: 1;
+  }
+  .stat-label { font-size: 11px; font-weight: 600; letter-spacing: 2px; color: var(--muted); margin-top: 6px; text-transform: uppercase; }
+  .stat-delta {
+    font-family: 'Share Tech Mono'; font-size: 11px;
+    margin-top: 8px; color: var(--muted);
+  }
+  .c-cyan   { color: var(--cyan); }
+  .c-green  { color: var(--green); }
+  .c-red    { color: var(--red); }
+  .c-orange { color: var(--orange); }
+  .c-purple { color: var(--purple); }
+  .c-yellow { color: var(--yellow); }
+
+  /* ── SECTION HEADER ── */
+  .section-title {
+    font-size: 11px; font-weight: 700; letter-spacing: 3px;
+    text-transform: uppercase; color: var(--muted);
+    margin-bottom: 16px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .section-title::after {
+    content: ''; flex: 1; height: 1px;
+    background: linear-gradient(90deg, var(--border), transparent);
+  }
+
+  /* ── LIVE LOG TABLE ── */
+  .log-wrap { max-height: 340px; overflow-y: auto; }
+  .log-wrap::-webkit-scrollbar { width: 4px; }
+  .log-wrap::-webkit-scrollbar-track { background: var(--bg2); }
+  .log-wrap::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  table { width: 100%; border-collapse: collapse; font-family: 'Share Tech Mono'; font-size: 12px; }
+  thead th {
+    position: sticky; top: 0;
+    background: var(--bg2); padding: 8px 10px;
+    text-align: left; color: var(--muted); letter-spacing: 1px;
+    border-bottom: 1px solid var(--border);
+  }
+  tbody tr {
+    border-bottom: 1px solid rgba(26,58,85,.4);
+    transition: background .15s;
+    animation: row-in .3s ease forwards;
+  }
+  @keyframes row-in {
+    from { opacity: 0; transform: translateX(-6px); }
+    to   { opacity: 1; transform: translateX(0); }
+  }
+  tbody tr:hover { background: rgba(0,212,255,.04); }
+  tbody td { padding: 7px 10px; vertical-align: middle; }
+
+  .badge {
+    display: inline-block; padding: 2px 8px; border-radius: 4px;
+    font-size: 10px; font-weight: 700; letter-spacing: .5px;
+    white-space: nowrap;
+  }
+  .badge-red    { background:rgba(255,58,92,.15);  border:1px solid var(--red);    color:var(--red); }
+  .badge-orange { background:rgba(255,140,0,.15);  border:1px solid var(--orange); color:var(--orange); }
+  .badge-yellow { background:rgba(255,215,0,.15);  border:1px solid var(--yellow); color:var(--yellow); }
+  .badge-purple { background:rgba(176,96,255,.15); border:1px solid var(--purple); color:var(--purple); }
+  .badge-green  { background:rgba(0,255,136,.15);  border:1px solid var(--green);  color:var(--green); }
+  .badge-cyan   { background:rgba(0,212,255,.15);  border:1px solid var(--cyan);   color:var(--cyan); }
+
+  /* ── CHART BARS ── */
+  .bar-chart { display: flex; flex-direction: column; gap: 10px; }
+  .bar-row { display: flex; align-items: center; gap: 10px; }
+  .bar-label { font-family: 'Share Tech Mono'; font-size: 11px; color: var(--muted); min-width: 110px; }
+  .bar-track { flex: 1; height: 10px; background: var(--bg2); border-radius: 5px; overflow: hidden; }
+  .bar-fill {
+    height: 100%; border-radius: 5px;
+    transition: width 1s cubic-bezier(.4,0,.2,1);
+    background: linear-gradient(90deg, var(--cyan), #0080ff);
+  }
+  .bar-fill.red    { background: linear-gradient(90deg, var(--red), #ff0080); }
+  .bar-fill.orange { background: linear-gradient(90deg, var(--orange), #ff5000); }
+  .bar-fill.purple { background: linear-gradient(90deg, var(--purple), #6030c0); }
+  .bar-count { font-family: 'Share Tech Mono'; font-size: 11px; color: var(--text); min-width: 35px; text-align: right; }
+
+  /* ── DONUT ── */
+  .donut-wrap {
+    display: flex; align-items: center; justify-content: center;
+    gap: 24px; flex-wrap: wrap;
+  }
+  .donut-legend { display: flex; flex-direction: column; gap: 8px; }
+  .legend-item { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+  .legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+
+  /* ── RULES TABLE ── */
+  .rules-wrap { max-height: 280px; overflow-y: auto; }
+  .rules-wrap::-webkit-scrollbar { width: 4px; }
+  .rules-wrap::-webkit-scrollbar-thumb { background: var(--border); }
+
+  /* ── CONTROLS ── */
+  .controls { display: flex; flex-wrap: wrap; gap: 10px; }
+  .btn {
+    padding: 9px 18px; border-radius: 8px; border: 1px solid;
+    font-family: 'Exo 2'; font-size: 12px; font-weight: 700;
+    letter-spacing: 1px; cursor: pointer; text-transform: uppercase;
+    transition: all .2s; position: relative; overflow: hidden;
+  }
+  .btn::after {
+    content: '';
+    position: absolute; inset: 0;
+    background: currentColor; opacity: 0;
+    transition: opacity .2s;
+  }
+  .btn:hover::after { opacity: .1; }
+  .btn:active { transform: scale(.97); }
+
+  .btn-cyan   { color:var(--cyan);   border-color:var(--cyan);   background:rgba(0,212,255,.06); }
+  .btn-red    { color:var(--red);    border-color:var(--red);    background:rgba(255,58,92,.06); }
+  .btn-green  { color:var(--green);  border-color:var(--green);  background:rgba(0,255,136,.06); }
+  .btn-orange { color:var(--orange); border-color:var(--orange); background:rgba(255,140,0,.06); }
+
+  /* ── IP INPUT ── */
+  .ip-row { display: flex; gap: 10px; align-items: center; margin-top: 12px; }
+  .ip-input {
+    flex: 1; background: var(--bg2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 9px 14px;
+    font-family: 'Share Tech Mono'; font-size: 13px; color: var(--text);
+    outline: none; transition: border-color .2s;
+  }
+  .ip-input:focus { border-color: var(--cyan); }
+  .ip-input::placeholder { color: var(--muted); }
+
+  /* ── THREAT MAP ── */
+  .threat-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(90px,1fr));
+    gap: 8px;
+  }
+  .threat-cell {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 8px;
+    text-align: center;
+    transition: all .3s;
+    cursor: default;
+  }
+  .threat-cell.active {
+    border-color: var(--red);
+    box-shadow: 0 0 15px rgba(255,58,92,.3);
+    animation: threat-pulse 1s ease-in-out;
+  }
+  @keyframes threat-pulse {
+    0%,100% { box-shadow: 0 0 10px rgba(255,58,92,.3); }
+    50%      { box-shadow: 0 0 30px rgba(255,58,92,.8); }
+  }
+  .threat-cell .t-icon { font-size: 20px; margin-bottom: 4px; }
+  .threat-cell .t-name { font-size: 9px; font-weight: 700; letter-spacing: .5px; color: var(--muted); text-transform: uppercase; }
+  .threat-cell .t-count { font-size: 18px; font-weight: 900; color: var(--text); margin: 2px 0; }
+
+  /* ── PORT STATUS ── */
+  .port-grid { display: flex; flex-wrap: wrap; gap: 10px; }
+  .port-item {
+    background: var(--bg2);
+    border-radius: 8px;
+    padding: 10px 14px;
+    display: flex; flex-direction: column; align-items: center;
+    min-width: 70px;
+    border: 1px solid;
+    transition: box-shadow .3s;
+  }
+  .port-item.open   { border-color: var(--green); }
+  .port-item.closed { border-color: var(--border); }
+  .port-item .p-num  { font-family: 'Share Tech Mono'; font-size: 15px; font-weight: 700; }
+  .port-item .p-svc  { font-size: 9px; color: var(--muted); letter-spacing: .5px; text-transform: uppercase; margin-top: 2px; }
+  .port-item .p-dot  { width: 8px; height: 8px; border-radius: 50%; margin-top: 6px; }
+  .port-item.open   .p-dot { background: var(--green); box-shadow: 0 0 8px var(--green); animation: blink 1.5s step-end infinite; }
+  .port-item.closed .p-dot { background: var(--muted); }
+  .port-item.open   .p-num { color: var(--green); }
+  .port-item.closed .p-num { color: var(--muted); }
+
+  /* ── TIMELINE CHART ── */
+  .timeline { display: flex; align-items: flex-end; gap: 4px; height: 80px; padding-top: 8px; }
+  .t-bar {
+    flex: 1; border-radius: 3px 3px 0 0;
+    background: linear-gradient(0deg, var(--cyan), rgba(0,212,255,.3));
+    min-height: 2px;
+    transition: height .8s cubic-bezier(.4,0,.2,1);
+    position: relative;
+    cursor: default;
+  }
+  .t-bar:hover::before {
+    content: attr(data-tip);
+    position: absolute; bottom: calc(100% + 4px); left: 50%;
+    transform: translateX(-50%);
+    background: var(--bg2); border: 1px solid var(--border);
+    padding: 3px 8px; border-radius: 4px;
+    font-family: 'Share Tech Mono'; font-size: 10px; white-space: nowrap;
+    color: var(--cyan);
+  }
+
+  /* ── NOTIFICATION ── */
+  #notifications {
+    position: fixed; bottom: 24px; right: 24px;
+    display: flex; flex-direction: column-reverse; gap: 8px;
+    z-index: 9998;
+  }
+  .notif {
+    padding: 12px 18px; border-radius: 8px; font-size: 12px; font-weight: 600;
+    max-width: 320px;
+    border-left: 3px solid;
+    backdrop-filter: blur(8px);
+    animation: notif-in .3s ease;
+    cursor: pointer;
+  }
+  @keyframes notif-in {
+    from { opacity: 0; transform: translateX(20px); }
+    to   { opacity: 1; transform: translateX(0); }
+  }
+  .notif-warn  { background:rgba(255,140,0,.15);  border-color:var(--orange); color:var(--orange); }
+  .notif-block { background:rgba(255,58,92,.15);  border-color:var(--red);    color:var(--red); }
+  .notif-ok    { background:rgba(0,255,136,.15);  border-color:var(--green);  color:var(--green); }
+  .notif-info  { background:rgba(0,212,255,.15);  border-color:var(--cyan);   color:var(--cyan); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-shield">🛡</div>
+    <div>
+      <div class="logo-text">KALI FIREWALL</div>
+      <div class="logo-sub">iptables Enhanced Security Dashboard</div>
+    </div>
+  </div>
+  <div class="header-right">
+    <div class="status-pill" id="fwStatus">● ACTIVE</div>
+    <div class="time-display" id="clockDisplay">—</div>
+  </div>
+</header>
+
+<main>
+
+  <!-- ── STAT CARDS ── -->
+  <div class="grid-4">
+    <div class="card stat-card">
+      <div class="stat-icon c-red">🚫</div>
+      <div class="stat-value c-red" id="totalBlocked">0</div>
+      <div class="stat-label">Total Blocked</div>
+      <div class="stat-delta" id="blockedDelta">+0 this session</div>
+    </div>
+    <div class="card stat-card">
+      <div class="stat-icon c-red">🔨</div>
+      <div class="stat-value c-red" id="bruteForce">0</div>
+      <div class="stat-label">Brute Force Attempts</div>
+      <div class="stat-delta">SSH connection floods</div>
+    </div>
+    <div class="card stat-card">
+      <div class="stat-icon c-orange">📡</div>
+      <div class="stat-value c-orange" id="portScans">0</div>
+      <div class="stat-label">Port Scan Events</div>
+      <div class="stat-delta">NULL / XMAS / FIN scans</div>
+    </div>
+    <div class="card stat-card">
+      <div class="stat-icon c-purple">🌐</div>
+      <div class="stat-value c-purple" id="uniqueAttackers">0</div>
+      <div class="stat-label">Unique Attackers</div>
+      <div class="stat-delta">Distinct source IPs</div>
+    </div>
+  </div>
+
+  <!-- ── ACTIVITY TIMELINE + THREAT TYPES ── -->
+  <div class="grid-2">
+    <div class="card">
+      <div class="section-title">📈 Activity Timeline (24h)</div>
+      <div class="timeline" id="timeline"></div>
+      <div style="display:flex;justify-content:space-between;margin-top:6px;">
+        <span style="font-size:10px;color:var(--muted);font-family:'Share Tech Mono'">00:00</span>
+        <span style="font-size:10px;color:var(--muted);font-family:'Share Tech Mono'">12:00</span>
+        <span style="font-size:10px;color:var(--muted);font-family:'Share Tech Mono'">Now</span>
+      </div>
+    </div>
+    <div class="card">
+      <div class="section-title">⚡ Threat Detection Matrix</div>
+      <div class="threat-grid" id="threatGrid"></div>
+    </div>
+  </div>
+
+  <!-- ── PORT STATUS + TOP ATTACKERS ── -->
+  <div class="grid-2">
+    <div class="card">
+      <div class="section-title">🔌 Port & Service Status</div>
+      <div class="port-grid" id="portGrid"></div>
+    </div>
+    <div class="card">
+      <div class="section-title">🎯 Top Source IPs</div>
+      <div class="bar-chart" id="topSources"></div>
+    </div>
+  </div>
+
+  <!-- ── LIVE LOG ── -->
+  <div class="card" style="margin-bottom:20px">
+    <div class="section-title" style="justify-content:space-between">
+      <span>📋 Live Firewall Log</span>
+      <div style="display:flex;gap:8px;align-items:center">
+        <span id="logCount" style="font-family:'Share Tech Mono';font-size:11px;color:var(--muted)">0 events</span>
+        <button class="btn btn-cyan" style="padding:4px 10px;font-size:10px" onclick="clearLogs()">CLEAR</button>
+      </div>
+    </div>
+    <div class="log-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>TIME</th>
+            <th>THREAT TYPE</th>
+            <th>SOURCE IP</th>
+            <th>DEST IP</th>
+            <th>PORT</th>
+            <th>ACTION</th>
+          </tr>
+        </thead>
+        <tbody id="logTable"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ── ACTIVE RULES + CONTROLS ── -->
+  <div class="grid-2">
+    <div class="card">
+      <div class="section-title">📜 Active iptables Rules</div>
+      <div class="rules-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>#</th><th>TARGET</th><th>PROTO</th><th>SOURCE</th><th>DEST</th><th>OPTIONS</th>
+            </tr>
+          </thead>
+          <tbody id="rulesTable"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="section-title">🎛 Firewall Controls</div>
+      <div class="controls">
+        <button class="btn btn-green"  onclick="ctrlAction('start')">▶ START</button>
+        <button class="btn btn-red"    onclick="ctrlAction('stop')">■ STOP</button>
+        <button class="btn btn-orange" onclick="ctrlAction('reload')">↺ RELOAD</button>
+        <button class="btn btn-cyan"   onclick="ctrlAction('status')">ℹ STATUS</button>
+        <button class="btn btn-cyan"   onclick="ctrlAction('export')">⬇ EXPORT LOGS</button>
+      </div>
+
+      <div style="margin-top:20px">
+        <div class="section-title" style="margin-bottom:12px">🚫 Block / Unblock IP</div>
+        <div class="ip-row">
+          <input class="ip-input" id="ipInput" placeholder="e.g. 192.168.1.105" />
+          <button class="btn btn-red"   onclick="blockIP()">BLOCK</button>
+          <button class="btn btn-green" onclick="unblockIP()">UNBLOCK</button>
+        </div>
+      </div>
+
+      <div style="margin-top:20px">
+        <div class="section-title" style="margin-bottom:12px">✅ Blocked IP List</div>
+        <div id="blockedList" style="font-family:'Share Tech Mono';font-size:11px;color:var(--muted);max-height:100px;overflow-y:auto"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── POLICY SUMMARY ── -->
+  <div class="card full">
+    <div class="section-title">🔒 Security Policy Summary</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px">
+      <div id="policy0" class="policy-item"></div>
+      <div id="policy1" class="policy-item"></div>
+      <div id="policy2" class="policy-item"></div>
+      <div id="policy3" class="policy-item"></div>
+      <div id="policy4" class="policy-item"></div>
+      <div id="policy5" class="policy-item"></div>
+    </div>
+  </div>
+
+</main>
+
+<div id="notifications"></div>
+
+<style>
+  .policy-item {
+    background: var(--bg2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 14px;
+  }
+  .policy-item .pi-icon { font-size: 20px; margin-bottom: 6px; }
+  .policy-item .pi-title { font-size: 12px; font-weight: 700; color: var(--text); margin-bottom: 3px; }
+  .policy-item .pi-desc  { font-size: 11px; color: var(--muted); line-height: 1.5; }
+  .policy-item .pi-status {
+    margin-top: 8px; font-size: 10px; font-weight: 700; letter-spacing: 1px;
+    padding: 2px 8px; border-radius: 3px; display: inline-block;
+  }
+  .pi-active   { background: rgba(0,255,136,.1); color: var(--green); border: 1px solid var(--green); }
+  .pi-inactive { background: rgba(255,58,92,.1);  color: var(--red);   border: 1px solid var(--red);  }
+</style>
+
+<script>
+// ══════════════════════════════════════════════════════════
+//  FIREWALL DASHBOARD — Main Logic
+// ══════════════════════════════════════════════════════════
+
+const PORTS = [
+  {num:22, svc:'SSH',   open:true },
+  {num:80, svc:'HTTP',  open:true },
+  {num:443,svc:'HTTPS', open:true },
+  {num:21, svc:'FTP',   open:false},
+  {num:23, svc:'Telnet',open:false},
+  {num:3389,svc:'RDP',  open:false},
+  {num:8080,svc:'ALT',  open:false},
+  {num:25, svc:'SMTP',  open:false},
+];
+
+const POLICIES = [
+  {icon:'🚫',title:'Default DENY Policy',     desc:'All incoming & forwarded traffic blocked by default',     active:true },
+  {icon:'🔐',title:'SSH Brute-Force Guard',   desc:'Max 5 SSH attempts per 60 seconds per source IP',        active:true },
+  {icon:'📡',title:'Port Scan Detection',     desc:'NULL, XMAS, FIN scan detection with auto-drop',          active:true },
+  {icon:'🌊',title:'SYN Flood Protection',    desc:'Rate-limited SYN packets — max 10/s, burst 20',          active:true },
+  {icon:'📋',title:'Packet Logging',          desc:'All dropped packets logged with [FW-*] prefix',          active:true },
+  {icon:'✅',title:'Stateful Inspection',     desc:'ESTABLISHED/RELATED connections tracked and allowed',    active:true },
+];
+
+const THREAT_DEFS = [
+  {key:'BLOCKED',   icon:'🚫', label:'Blocked',     color:'yellow'},
+  {key:'BLOCKED-IP',icon:'🌐', label:'Bad IP',      color:'purple'},
+  {key:'SSH-BRUTE', icon:'🔨', label:'SSH Brute',   color:'red'   },
+  {key:'SYN-FLOOD', icon:'🌊', label:'SYN Flood',   color:'red'   },
+  {key:'NULL-SCAN', icon:'👻', label:'NULL Scan',   color:'orange'},
+  {key:'XMAS-SCAN', icon:'🎄', label:'XMAS Scan',   color:'orange'},
+  {key:'FIN-SCAN',  icon:'🔪', label:'FIN Scan',    color:'orange'},
+];
+
+// ── Real State (no simulation) ────────────────────────────
+let simState = {
+  totalBlocked:    0,
+  bruteForce:      0,
+  portScans:       0,
+  uniqueAttackers: new Set(),
+  threatCounts:    {},
+  hourlyBuckets:   new Array(24).fill(0),
+  topSources:      {},
+  blockedIPs:      [],
+  logs:            [],
+  running:         true,
+};
+
+const BADGE_MAP = {
+  red:'badge-red', orange:'badge-orange',
+  yellow:'badge-yellow', purple:'badge-purple',
+  green:'badge-green', cyan:'badge-cyan',
+};
+
+// ── Parse a real log line from firewall_monitor.py ────────
+// Expected format from stats.json recent_logs entries:
+// { time, type, src, dst, port, color }
+function ingestEntry(entry){
+  simState.totalBlocked++;
+  simState.uniqueAttackers.add(entry.src);
+  simState.topSources[entry.src] = (simState.topSources[entry.src]||0)+1;
+
+  // Map type string back to threat key
+  const typeUpper = (entry.type||'').toUpperCase();
+  if(typeUpper.includes('BRUTE'))     simState.bruteForce++;
+  if(typeUpper.includes('SCAN'))      simState.portScans++;
+
+  const key = Object.keys(THREAT_DEFS.reduce((a,d)=>({...a,[d.label.toUpperCase()]:d.key}),{}))
+                .find(k=>typeUpper.includes(k));
+  const defKey = THREAT_DEFS.find(d=>d.label.toUpperCase()===typeUpper)?.key || 'BLOCKED';
+  simState.threatCounts[defKey] = (simState.threatCounts[defKey]||0)+1;
+
+  const h = new Date(entry.time).getHours();
+  if(!isNaN(h)) simState.hourlyBuckets[h]++;
+
+  simState.logs.unshift(entry);
+  if(simState.logs.length > 200) simState.logs.pop();
+
+  prependLogRow(entry);
+  flashThreat(defKey);
+
+  if(typeUpper.includes('BRUTE'))
+    showNotif(`SSH brute-force from ${entry.src}`, 'block');
+  else if(typeUpper.includes('SCAN'))
+    showNotif(`Port scan detected from ${entry.src}`, 'warn');
+}
+
+// ── Poll stats.json written by firewall_monitor.py ────────
+let lastLogCount = 0;
+
+async function pollStats(){
+  try {
+    const res  = await fetch('http://localhost:8080/stats');
+    if(!res.ok) throw new Error('not ok');
+    const data = await res.json();
+
+    // Load blocked IPs list
+    simState.blockedIPs = data.blocked_ips || [];
+
+    // Ingest only NEW log entries since last poll
+    const incoming = data.recent_logs || [];
+    const newEntries = incoming.slice(0, Math.max(0, incoming.length - lastLogCount));
+    lastLogCount = incoming.length;
+    newEntries.reverse().forEach(ingestEntry);
+
+    updateStats();
+    renderBlockedList();
+    renderActiveRulesFromData(data.active_rules || []);
+
+    document.getElementById('fwStatus').textContent = '● ACTIVE';
+
+  } catch(e) {
+    // Backend not reachable — show waiting state, no fake data
+    document.getElementById('fwStatus').textContent = '● WAITING';
+    document.getElementById('fwStatus').style.cssText =
+      'background:rgba(255,215,0,.1);border-color:var(--yellow);color:var(--yellow)';
+    showWaitingMessage();
+  }
+}
+
+function showWaitingMessage(){
+  const tb = document.getElementById('logTable');
+  if(tb && tb.children.length === 0){
+    tb.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:30px;color:var(--muted);font-family:'Share Tech Mono'">
+      Waiting for firewall_monitor.py...<br>
+      <span style="font-size:11px">Run: sudo python3 firewall_monitor.py</span>
+    </td></tr>`;
+  }
+}
+
+// ── Init ──────────────────────────────────────────────────
+function init(){
+  renderPorts();
+  renderPolicies();
+  renderThreatGrid();
+  renderTimeline();
+  renderBlockedList();
+  renderDefaultRules();
+  setInterval(updateClock, 1000);
+  updateClock();
+
+  // Poll real data every 3 seconds — no simulation
+  pollStats();
+  setInterval(pollStats, 3000);
+}
+
+// ── DOM Rendering ─────────────────────────────────────────
+function updateStats(){
+  animateCount('totalBlocked', simState.totalBlocked);
+  animateCount('bruteForce',   simState.bruteForce);
+  animateCount('portScans',    simState.portScans);
+  animateCount('uniqueAttackers', simState.uniqueAttackers.size);
+  document.getElementById('blockedDelta').textContent = `+${simState.totalBlocked} this session`;
+  document.getElementById('logCount').textContent = `${simState.logs.length} events`;
+  renderTopSources();
+  renderThreatGrid();
+  renderTimeline();
+  renderBlockedList();
+}
+
+function animateCount(id, target){
+  const el = document.getElementById(id);
+  if(!el) return;
+  const cur = parseInt(el.textContent)||0;
+  if(cur===target) return;
+  const step = Math.sign(target-cur)*Math.max(1,Math.ceil(Math.abs(target-cur)/8));
+  el.textContent = Math.min(cur+step, target);
+}
+
+function prependLogRow(entry){
+  const tb = document.getElementById('logTable');
+  if(!tb) return;
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td>${entry.time}</td>
+    <td><span class="badge ${BADGE_MAP[entry.color]||'badge-yellow'}">${entry.type}</span></td>
+    <td style="font-family:'Share Tech Mono'">${entry.src}</td>
+    <td style="font-family:'Share Tech Mono'">${entry.dst}</td>
+    <td style="font-family:'Share Tech Mono';color:var(--cyan)">${entry.port}</td>
+    <td><span class="badge badge-red">DROP</span></td>
+  `;
+  tb.insertBefore(tr, tb.firstChild);
+  if(tb.children.length > 60) tb.removeChild(tb.lastChild);
+}
+
+function renderTopSources(){
+  const el = document.getElementById('topSources');
+  if(!el) return;
+  const sorted = Object.entries(simState.topSources)
+    .sort((a,b)=>b[1]-a[1]).slice(0,7);
+  const max = sorted[0]?.[1]||1;
+  el.innerHTML = sorted.map(([ip,cnt],i)=>`
+    <div class="bar-row">
+      <div class="bar-label">${ip}</div>
+      <div class="bar-track">
+        <div class="bar-fill ${i<2?'red':i<4?'orange':''}"
+             style="width:${Math.round(cnt/max*100)}%"></div>
+      </div>
+      <div class="bar-count">${cnt}</div>
+    </div>
+  `).join('');
+}
+
+function renderThreatGrid(){
+  const el = document.getElementById('threatGrid');
+  if(!el) return;
+  el.innerHTML = THREAT_DEFS.map(d=>`
+    <div class="threat-cell" id="tc-${d.key}">
+      <div class="t-icon">${d.icon}</div>
+      <div class="t-count">${simState.threatCounts[d.key]||0}</div>
+      <div class="t-name">${d.label}</div>
+    </div>
+  `).join('');
+}
+
+function flashThreat(key){
+  const el = document.getElementById('tc-'+key);
+  if(!el) return;
+  el.classList.add('active');
+  setTimeout(()=>el.classList.remove('active'), 900);
+}
+
+function renderTimeline(){
+  const el = document.getElementById('timeline');
+  if(!el) return;
+  const max = Math.max(...simState.hourlyBuckets, 1);
+  el.innerHTML = simState.hourlyBuckets.map((v,h)=>`
+    <div class="t-bar" style="height:${Math.round(v/max*72)+2}px"
+         data-tip="${h}:00 — ${v} events"></div>
+  `).join('');
+}
+
+function renderPorts(){
+  const el = document.getElementById('portGrid');
+  if(!el) return;
+  el.innerHTML = PORTS.map(p=>`
+    <div class="port-item ${p.open?'open':'closed'}">
+      <div class="p-num">${p.num}</div>
+      <div class="p-svc">${p.svc}</div>
+      <div class="p-dot"></div>
+    </div>
+  `).join('');
+}
+
+function renderPolicies(){
+  POLICIES.forEach((p,i)=>{
+    const el = document.getElementById('policy'+i);
+    if(!el) return;
+    el.innerHTML = `
+      <div class="pi-icon">${p.icon}</div>
+      <div class="pi-title">${p.title}</div>
+      <div class="pi-desc">${p.desc}</div>
+      <div class="pi-status ${p.active?'pi-active':'pi-inactive'}">${p.active?'ACTIVE':'INACTIVE'}</div>
+    `;
+  });
+}
+
+function renderBlockedList(){
+  const el = document.getElementById('blockedList');
+  if(!el) return;
+  if(!simState.blockedIPs.length){
+    el.textContent='No IPs currently blocked'; return;
+  }
+  el.innerHTML = simState.blockedIPs.map(ip=>
+    `<div style="margin-bottom:4px">
+       <span style="color:var(--red)">● </span>${ip}
+       <span style="color:var(--muted);margin-left:8px;cursor:pointer"
+             onclick="quickUnblock('${ip}')">[unblock]</span>
+     </div>`
+  ).join('');
+}
+
+function renderDefaultRules(){
+  // Empty on load — real rules arrive via renderActiveRulesFromData()
+  const tb = document.getElementById('rulesTable');
+  if(!tb) return;
+  tb.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:20px;
+    color:var(--muted);font-family:'Share Tech Mono'">
+    Waiting for live rules from firewall_monitor.py...
+  </td></tr>`;
+}
+
+function renderActiveRulesFromData(rules){
+  const tb = document.getElementById('rulesTable');
+  if(!tb || !rules.length) return;
+  tb.innerHTML = rules.map(r=>`
+    <tr>
+      <td style="color:var(--muted)">${r.num}</td>
+      <td><span class="badge ${r.target==='ACCEPT'?'badge-green':r.target==='LOG'?'badge-cyan':'badge-red'}">${r.target}</span></td>
+      <td style="font-family:'Share Tech Mono'">${r.prot||'—'}</td>
+      <td style="font-family:'Share Tech Mono';font-size:11px">${r.src||'—'}</td>
+      <td style="font-family:'Share Tech Mono';font-size:11px">${r.dst||'—'}</td>
+      <td style="font-family:'Share Tech Mono';font-size:10px;color:var(--muted)">${r.opts||''}</td>
+    </tr>
+  `).join('');
+}
+
+// ── Controls ──────────────────────────────────────────────
+function ctrlAction(action){
+  const msgs = {
+    start:  ['Firewall started. All rules loaded.', 'ok'],
+    stop:   ['⚠ Firewall STOPPED. System is unprotected!', 'block'],
+    reload: ['Rules reloaded from /etc/iptables/rules.v4', 'info'],
+    status: ['Active. INPUT:DROP | FORWARD:DROP | OUTPUT:ACCEPT', 'info'],
+    export: [exportLogs(), 'ok'],
+  };
+  const [msg, type] = msgs[action]||['Unknown action','warn'];
+  if(action==='export') return;
+  showNotif(msg, type);
+  if(action==='stop'){
+    simState.running=false;
+    document.getElementById('fwStatus').textContent='● STOPPED';
+    document.getElementById('fwStatus').style.cssText='background:rgba(255,58,92,.1);border-color:var(--red);color:var(--red)';
+  }
+  if(action==='start'){
+    simState.running=true;
+    document.getElementById('fwStatus').textContent='● ACTIVE';
+    document.getElementById('fwStatus').style.cssText='';
+  }
+}
+
+function blockIP(){
+  const ip = document.getElementById('ipInput').value.trim();
+  if(!ip){ showNotif('Enter a valid IP address.','warn'); return; }
+  if(!/^\d{1,3}(\.\d{1,3}){3}$/.test(ip)){ showNotif('Invalid IP format.','warn'); return; }
+  if(simState.blockedIPs.includes(ip)){ showNotif(`${ip} already blocked.`,'warn'); return; }
+  simState.blockedIPs.push(ip);
+  renderBlockedList();
+  showNotif(`Blocked: ${ip}`,'block');
+  document.getElementById('ipInput').value='';
+}
+
+function unblockIP(){
+  const ip = document.getElementById('ipInput').value.trim();
+  quickUnblock(ip);
+  document.getElementById('ipInput').value='';
+}
+
+function quickUnblock(ip){
+  const idx = simState.blockedIPs.indexOf(ip);
+  if(idx===-1){ showNotif(`${ip} is not in the blocklist.`,'warn'); return; }
+  simState.blockedIPs.splice(idx,1);
+  renderBlockedList();
+  showNotif(`Unblocked: ${ip}`,'ok');
+}
+
+function clearLogs(){
+  simState.logs=[];
+  document.getElementById('logTable').innerHTML='';
+  document.getElementById('logCount').textContent='0 events';
+  showNotif('Logs cleared.','info');
+}
+
+function exportLogs(){
+  const csv = ['Time,Type,Source,Destination,Port,Action']
+    .concat(simState.logs.map(l=>`${l.time},${l.type},${l.src},${l.dst},${l.port},DROP`))
+    .join('\n');
+  const a=document.createElement('a');
+  a.href='data:text/csv,'+encodeURIComponent(csv);
+  a.download='firewall_logs_'+new Date().toISOString().slice(0,10)+'.csv';
+  a.click();
+  showNotif('Logs exported as CSV.','ok');
+}
+
+// ── Notifications ──────────────────────────────────────────
+function showNotif(msg, type='info'){
+  const el = document.createElement('div');
+  el.className = `notif notif-${type}`;
+  el.textContent = msg;
+  el.onclick = ()=>el.remove();
+  document.getElementById('notifications').appendChild(el);
+  setTimeout(()=>el.remove(), 5000);
+}
+
+// ── Clock ──────────────────────────────────────────────────
+function updateClock(){
+  const now = new Date();
+  document.getElementById('clockDisplay').textContent =
+    now.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'}) +
+    ' ' + now.toLocaleTimeString('en-GB',{hour12:false});
+}
+
+// ── Start ──────────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded', init);
+</script>
+</body>
+</html>
